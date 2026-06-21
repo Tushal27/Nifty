@@ -7,7 +7,7 @@ data:
   #   "yfinance" -> Yahoo Finance ^NSEI   (history only reaches ~2007)
   #   "nse"      -> niftyindices.com API   (reaches index inception ~1996 — the max)
   # A non-null csv_path below overrides this and loads your own file instead.
-  source: "yfinance"
+  source: "nse"
   ticker: "^NSEI"          # used when source == yfinance
   nse_index_name: "NIFTY 50"  # used when source == nse (e.g. "NIFTY 50", "NIFTY BANK")
   nse_retries: 3           # per-request retries with exponential backoff (source == nse)
