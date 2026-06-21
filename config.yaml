@@ -28,6 +28,25 @@ data:
 target:
   horizon: 10
 
+# Optional exogenous (non-price) inputs — the honest way to add real predictive
+# skill, since they carry information the price chart does not. Each CSV needs a
+# Date column + one or more numeric value columns. Every value is auto-lagged by
+# lag_days so the model only sees PAST values (no look-ahead). Missing files are
+# skipped, so the pipeline still runs before you supply them. Note: VIX/flows
+# only start ~2008, so enabling them trims the usable history to that period.
+external:
+  enabled: true
+  lag_days: 1
+  sources:
+    - path: "external_data/india_vix.csv"   # NSE/Yahoo ^INDIAVIX daily close
+      prefix: "vix"
+    - path: "external_data/sp500.csv"        # Yahoo ^GSPC daily close (overnight US lead)
+      prefix: "sp500"
+    - path: "external_data/usdinr.csv"       # Yahoo INR=X daily close
+      prefix: "usdinr"
+    - path: "external_data/fii_dii.csv"      # NSE daily FII/DII net flows (₹ cr)
+      prefix: "flow"
+
 features:
   sma_windows: [10, 20, 50, 200]
   ema_windows: [10, 20, 50]

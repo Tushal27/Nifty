@@ -7,6 +7,8 @@ label is the only thing that looks one day ahead, via ``Close.shift(-1)``.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -87,6 +89,71 @@ def add_indicators(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return out
 
 
+def _load_external_one(
+    path: str, prefix: str, lag: int, base_index: pd.DatetimeIndex
+) -> pd.DataFrame:
+    """Read one exogenous CSV and align it to the index, lagged to avoid leakage.
+
+    The CSV needs a Date column plus one or more numeric value columns. For each
+    value column we emit a level feature and a change feature (pct_change for
+    strictly-positive series like prices/VIX, plain diff for series that can go
+    negative like net flows). Everything is forward-filled onto the trading
+    calendar, then shifted by ``lag`` days so the model only ever sees PAST data.
+    """
+    ext = pd.read_csv(path)
+    ext.columns = [str(c).strip().lower() for c in ext.columns]
+    date_col = next(
+        (c for c in ("date", "datetime", "timestamp") if c in ext.columns), None
+    )
+    if date_col is None:
+        raise ValueError(f"{path}: no Date/Datetime column found.")
+    ext[date_col] = pd.to_datetime(ext[date_col])
+    ext = ext.set_index(date_col).sort_index()
+    ext = ext[~ext.index.duplicated(keep="last")]
+
+    value_cols = [c for c in ext.columns if c != date_col]
+    # Align external dates onto the Nifty trading calendar via forward fill.
+    aligned = (
+        ext.reindex(base_index.union(ext.index)).sort_index().ffill().reindex(base_index)
+    )
+
+    out = pd.DataFrame(index=base_index)
+    for c in value_cols:
+        s = pd.to_numeric(aligned[c], errors="coerce")
+        out[f"{prefix}_{c}"] = s
+        positive = s.dropna()
+        if len(positive) and (positive > 0).all():
+            out[f"{prefix}_{c}_chg"] = s.pct_change()
+        else:  # flows etc. can be negative -> pct_change is meaningless
+            out[f"{prefix}_{c}_chg"] = s.diff()
+
+    return out.shift(lag)  # critical: only past exogenous values are visible
+
+
+def add_external_features(df: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Join optional exogenous (non-price) features defined in config.external.
+
+    Files that don't exist yet are skipped with a notice, so the pipeline still
+    runs before the CSVs are supplied.
+    """
+    ext_cfg = config.raw.get("external") or {}
+    if not ext_cfg.get("enabled"):
+        return df
+
+    lag = int(ext_cfg.get("lag_days", 1))
+    out = df
+    for src in ext_cfg.get("sources", []):
+        path = src["path"]
+        prefix = src.get("prefix") or os.path.splitext(os.path.basename(path))[0]
+        if not os.path.exists(path):
+            print(f"      [external] skipping {prefix}: file not found ({path})")
+            continue
+        block = _load_external_one(path, prefix, lag, out.index)
+        out = out.join(block)
+        print(f"      [external] added {prefix}: {list(block.columns)}")
+    return out
+
+
 def make_label(df: pd.DataFrame, horizon: int = 1) -> pd.Series:
     """1 if the close ``horizon`` days ahead is higher than today's, else 0.
 
@@ -131,6 +198,7 @@ def build_dataset(
     the most recent row is kept in ``full`` for live-signal generation.
     """
     feat = add_indicators(df, config)
+    feat = add_external_features(feat, config)
     feat["target"] = make_label(feat, horizon=config.horizon)
 
     cols = feature_columns(feat, config)

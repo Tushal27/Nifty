@@ -107,6 +107,32 @@ accuracy at long horizons is **drift, not prediction**. Folds are also embargoed
 Takeaway: judge models by **skill above baseline / ROC-AUC**, never by raw
 accuracy on an imbalanced target.
 
+## External (exogenous) features — adding *real* skill
+
+Price-only models hit a ~0.52–0.55 AUC ceiling. The honest way past it is to feed
+the model information the price chart doesn't contain. Configure CSVs under
+`external` in `config.yaml`; each is **auto-lagged by `lag_days`** so only past
+values are ever visible (no look-ahead), and missing files are skipped.
+
+Fetch the market ones (run where the internet is reachable, then commit):
+
+```bash
+python scripts/fetch_external.py          # writes external_data/{india_vix,sp500,usdinr}.csv
+git add external_data/*.csv && git commit -m "Add external feature CSVs" && git push
+```
+
+| File (`external_data/`) | Source | Why it helps |
+|---|---|---|
+| `india_vix.csv` | Yahoo `^INDIAVIX` | Volatility / fear gauge — usually the strongest single signal |
+| `sp500.csv` | Yahoo `^GSPC` | US closes overnight before India opens → leak-free lead |
+| `usdinr.csv` | Yahoo `INR=X` | Rupee moves drive FII flows |
+| `fii_dii.csv` | NSE/Moneycontrol (manual) | Daily institutional net flows (₹ cr); columns `Date,fii_net,dii_net` |
+
+Each numeric column becomes a *level* and a *change* feature (pct-change for
+prices, diff for flows). Enabling series that start ~2008 (VIX, flows) trims the
+usable window to that period — fewer rows, but real signal. Watch the printed
+**skill (best − baseline)** to see whether they actually help.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.
