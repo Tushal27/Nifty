@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Nifty 50 next-day direction prediction — configuration
+# ---------------------------------------------------------------------------
+
+data:
+  ticker: "^NSEI"          # Nifty 50 index on Yahoo Finance
+  start: "1990-01-01"      # yfinance returns from the earliest it has (~2007 for ^NSEI)
+  end: null                # null => today
+  # Point this at your own long-history file to override the API fetch.
+  # Expected columns (case-insensitive): Date, Open, High, Low, Close, Volume
+  csv_path: null
+  cache_path: "data/nifty.parquet"
+
+features:
+  sma_windows: [10, 20, 50, 200]
+  ema_windows: [10, 20, 50]
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  vol_window: 20
+  momentum_windows: [5, 10, 20]
+
+# Toggle individual models on/off. tensorflow (lstm) is off by default because
+# it is a heavy dependency; enable it after `pip install tensorflow`.
+models:
+  logistic: true
+  random_forest: true
+  xgboost: true
+  lightgbm: true
+  lstm: false
+
+lstm:
+  window: 20               # number of past days fed to the sequence model
+  epochs: 15
+  batch_size: 32
+  units: 32
+
+evaluate:
+  n_splits: 5              # TimeSeriesSplit walk-forward folds
+  select_metric: "roc_auc" # metric used to pick the "best" model
+
+backtest:
+  threshold: 0.5           # go long when P(up) > threshold, else flat
+  allow_short: false       # if true, go short when P(up) < (1 - threshold)
+  cost_bps: 2.0            # per-trade transaction cost in basis points
+  trading_days: 252        # for annualising Sharpe / CAGR
+
+output:
+  dir: "outputs"
+  charts_dir: "outputs/charts"
+  metrics_csv: "outputs/metrics.csv"
+  signal_json: "outputs/latest_signal.json"
+
+random_seed: 42
