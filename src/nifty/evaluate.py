@@ -36,7 +36,10 @@ def evaluate_models(
 ) -> pd.DataFrame:
     """Walk-forward CV for each model; return a metrics comparison table."""
     n_splits = config.evaluate["n_splits"]
-    splitter = TimeSeriesSplit(n_splits=n_splits)
+    # Embargo ``horizon - 1`` days between train and test so an h-day-ahead label
+    # in the training tail cannot peek into prices that belong to the test set.
+    gap = max(config.horizon - 1, 0)
+    splitter = TimeSeriesSplit(n_splits=n_splits, gap=gap)
     Xv, yv = X.values, y.values
 
     rows = []

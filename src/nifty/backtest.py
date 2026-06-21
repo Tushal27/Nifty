@@ -21,11 +21,16 @@ def walk_forward_predict(
     X: pd.DataFrame,
     y: pd.Series,
     n_splits: int,
+    gap: int = 0,
 ) -> pd.Series:
-    """Expanding-window out-of-sample P(up) for the tail of the series."""
+    """Expanding-window out-of-sample P(up) for the tail of the series.
+
+    ``gap`` embargoes that many days between train and test so multi-day labels
+    in the training tail cannot peek into test-set prices.
+    """
     from sklearn.model_selection import TimeSeriesSplit
 
-    splitter = TimeSeriesSplit(n_splits=n_splits)
+    splitter = TimeSeriesSplit(n_splits=n_splits, gap=gap)
     Xv, yv = X.values, y.values
     proba = pd.Series(index=X.index, dtype=float)
     for train_idx, test_idx in splitter.split(Xv):
@@ -112,17 +117,22 @@ def latest_signal(
     """Predict the direction for the most recent available day."""
     proba = float(np.asarray(model.predict_proba(X.values))[-1])
     threshold = config.backtest["threshold"]
+    horizon = config.horizon
     last_date = X.index[-1]
     direction = "UP" if proba > threshold else "DOWN/FLAT"
+    horizon_text = (
+        "next trading day" if horizon == 1 else f"next {horizon} trading days"
+    )
     return {
         "as_of_date": str(last_date.date()),
-        "predicts_for": "next trading day",
+        "horizon_days": horizon,
+        "predicts_for": horizon_text,
         "probability_up": round(proba, 4),
         "signal": direction,
         "threshold": threshold,
         "last_close": float(full.loc[last_date, "close"]),
         "disclaimer": (
-            "Educational output only. Daily direction is near-random; this is not "
-            "financial advice."
+            "Educational output only. Short-horizon market direction is largely "
+            "noise; this is not financial advice."
         ),
     }

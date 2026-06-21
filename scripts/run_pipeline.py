@@ -36,6 +36,8 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--ticker", default=None)
+    parser.add_argument("--horizon", type=int, default=None,
+                        help="prediction horizon in days (1=next-day, 5-20=trend)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -43,6 +45,8 @@ def main() -> None:
         config.backtest["threshold"] = args.threshold
     if args.ticker is not None:
         config.data["ticker"] = args.ticker
+    if args.horizon is not None:
+        config.raw.setdefault("target", {})["horizon"] = args.horizon
 
     np.random.seed(config.random_seed)
 
@@ -56,8 +60,11 @@ def main() -> None:
     print("[2/6] Engineering features ...")
     X, y, full = build_dataset(df, config)
     cols = feature_columns(full, config)
-    print(f"      {X.shape[0]:,} samples x {X.shape[1]} features | "
-          f"up-day rate = {y.mean():.3f}")
+    horizon = config.horizon
+    target_desc = "next-day" if horizon == 1 else f"{horizon}-day-ahead trend"
+    print(f"      target = {target_desc} direction | "
+          f"{X.shape[0]:,} samples x {X.shape[1]} features | "
+          f"up rate = {y.mean():.3f}")
 
     print("[3/6] Walk-forward model comparison ...")
     factories = build_models(config)
@@ -68,7 +75,8 @@ def main() -> None:
 
     print("[4/6] Out-of-sample backtest ...")
     proba = walk_forward_predict(
-        factories[best], X, y, config.evaluate["n_splits"]
+        factories[best], X, y, config.evaluate["n_splits"],
+        gap=max(horizon - 1, 0),
     )
     bt, metrics = run_backtest(proba, full, config)
 
@@ -86,6 +94,17 @@ def main() -> None:
     print("[6/6] Summary")
     print("-" * 60)
     print(table.round(4).to_string())
+    # Majority-class ("always predict the more common direction") baseline. Any
+    # model that does not beat this is adding zero real skill — on an imbalanced
+    # multi-day target a high accuracy can be pure base-rate drift.
+    baseline = float(max(y.mean(), 1 - y.mean()))
+    best_acc = float(table["accuracy"].max())
+    print(f"Always-'{'up' if y.mean() >= 0.5 else 'down'}' baseline accuracy: "
+          f"{baseline:.4f}  |  best model: {best_acc:.4f}  |  "
+          f"skill (best - baseline): {best_acc - baseline:+.4f}")
+    if best_acc <= baseline:
+        print("  ⚠ No model beats the naive baseline — the accuracy is drift, "
+              "not predictive skill.")
     print("-" * 60)
     s, b = metrics["strategy"], metrics["buy_and_hold"]
     print(f"Backtest {metrics['period_start']} → {metrics['period_end']} "

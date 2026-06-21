@@ -87,6 +87,26 @@ The tests assert RSI bounds, that the label matches the realised next-day move,
 and — crucially — that altering a *future* price never changes a past feature
 row (i.e. no look-ahead leakage).
 
+## Prediction horizon (and why "70% accuracy" is a trap)
+
+Set `target.horizon` in `config.yaml` (or `--horizon N`):
+
+- `horizon: 1` — next-day direction. The hardest case: ~52–55% accuracy, which is
+  near the information limit of daily price data.
+- `horizon: 5–20+` — "will price be higher N days ahead?" (multi-day **trend**).
+  The accuracy *number* climbs toward 60–65% as N grows — **but** that rise is the
+  market's upward **drift (base rate)**, not model skill.
+
+To keep this honest, every run prints a **majority-class baseline** ("always
+predict the more common direction") and the model's **skill = accuracy −
+baseline**. Empirically on this data the skill is *negative* at every horizon — a
+trivial "always UP" model matches or beats the trained models. So a high headline
+accuracy at long horizons is **drift, not prediction**. Folds are also embargoed by
+`horizon − 1` days (`TimeSeriesSplit(gap=...)`) so overlapping labels can't leak.
+
+Takeaway: judge models by **skill above baseline / ROC-AUC**, never by raw
+accuracy on an imbalanced target.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.

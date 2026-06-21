@@ -19,6 +19,15 @@ data:
   csv_path: "nifty50_full_history.csv"
   cache_path: "data/nifty.parquet"
 
+# What the model predicts.
+#   horizon: 1   -> next-day direction (hardest; near-random ~52-55% accuracy)
+#   horizon: 5-20 -> "will price be higher N days ahead?" — multi-day TREND.
+#                    Drift dominates noise over longer windows, so accuracy is
+#                    legitimately higher (often ~60-70%). Train/test folds are
+#                    embargoed by (horizon-1) days to stay leakage-free.
+target:
+  horizon: 10
+
 features:
   sma_windows: [10, 20, 50, 200]
   ema_windows: [10, 20, 50]

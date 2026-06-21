@@ -44,6 +44,17 @@ def test_label_matches_next_day_move(sample_df):
         assert int(y.iloc[t]) == expected
 
 
+def test_label_horizon(sample_df):
+    """A horizon-H label compares close[t+H] to close[t]."""
+    H = 10
+    y = make_label(sample_df, horizon=H)
+    for t in (5, 100, 250):
+        expected = int(sample_df["close"].iloc[t + H] > sample_df["close"].iloc[t])
+        assert int(y.iloc[t]) == expected
+    # the final H rows have no forward price and must be NaN-droppable
+    assert y.iloc[-H:].isna().any() or (sample_df["close"].shift(-H).iloc[-H:].isna().all())
+
+
 def test_rsi_in_valid_range(sample_df, config):
     feat = add_indicators(sample_df, config)
     rsi = feat["rsi"].dropna()

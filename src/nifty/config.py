@@ -55,6 +55,15 @@ class Config:
         return self.raw["output"]
 
     @property
+    def target(self) -> dict[str, Any]:
+        return self.raw.get("target", {})
+
+    @property
+    def horizon(self) -> int:
+        """How many days ahead the direction label looks (1 = next-day)."""
+        return int(self.target.get("horizon", 1))
+
+    @property
     def random_seed(self) -> int:
         return int(self.raw.get("random_seed", 42))
 

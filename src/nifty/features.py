@@ -87,9 +87,20 @@ def add_indicators(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return out
 
 
-def make_label(df: pd.DataFrame) -> pd.Series:
-    """1 if the next day's close is higher than today's, else 0."""
-    return (df["close"].shift(-1) > df["close"]).astype(int)
+def make_label(df: pd.DataFrame, horizon: int = 1) -> pd.Series:
+    """1 if the close ``horizon`` days ahead is higher than today's, else 0.
+
+    ``horizon=1`` is next-day direction (the hardest, near-random case). Larger
+    horizons (e.g. 5-20) capture multi-day *trend*, where the market's drift
+    dominates daily noise, so the label is far more learnable.
+
+    The trailing ``horizon`` rows have no forward price and return NaN (so
+    ``build_dataset`` drops them) rather than a fabricated 0.
+    """
+    future = df["close"].shift(-horizon)
+    label = (future > df["close"]).astype("float")
+    label[future.isna()] = np.nan
+    return label
 
 
 # Columns that are raw prices / intermediate values, not predictive features.
@@ -120,11 +131,13 @@ def build_dataset(
     the most recent row is kept in ``full`` for live-signal generation.
     """
     feat = add_indicators(df, config)
-    feat["target"] = make_label(feat)
+    feat["target"] = make_label(feat, horizon=config.horizon)
 
     cols = feature_columns(feat, config)
 
-    # Rows usable for *training*: features present AND a known next-day label.
+    # Rows usable for *training*: features present AND a known forward label. The
+    # trailing ``horizon`` rows have no label yet and drop out here; the most
+    # recent row stays in ``full`` for live-signal generation.
     trainable = feat.dropna(subset=cols + ["target"])
     X = trainable[cols].copy()
     y = trainable["target"].astype(int).copy()
