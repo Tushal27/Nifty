@@ -154,7 +154,9 @@ def add_external_features(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     return out
 
 
-def make_label(df: pd.DataFrame, horizon: int = 1) -> pd.Series:
+def make_label(
+    df: pd.DataFrame, horizon: int = 1, mode: str = "close_to_close"
+) -> pd.Series:
     """1 if the close ``horizon`` days ahead is higher than today's, else 0.
 
     ``horizon=1`` is next-day direction (the hardest, near-random case). Larger
@@ -163,7 +165,16 @@ def make_label(df: pd.DataFrame, horizon: int = 1) -> pd.Series:
 
     The trailing ``horizon`` rows have no forward price and return NaN (so
     ``build_dataset`` drops them) rather than a fabricated 0.
+
+    ``mode="open_to_close"`` instead labels the *same* day's intraday move
+    (``close > open``), decided at the open — used with shifted features so the
+    overnight US lead can be exploited without look-ahead.
     """
+    if mode == "open_to_close":
+        label = (df["close"] > df["open"]).astype("float")
+        label[df["open"].isna() | df["close"].isna()] = np.nan
+        return label
+
     future = df["close"].shift(-horizon)
     label = (future > df["close"]).astype("float")
     label[future.isna()] = np.nan
@@ -197,9 +208,22 @@ def build_dataset(
     label) and warm-up rows with NaN indicators are dropped from ``X``/``y`` but
     the most recent row is kept in ``full`` for live-signal generation.
     """
+    mode = config.target_mode
     feat = add_indicators(df, config)
+
+    if mode == "open_to_close":
+        # Decision is made at today's OPEN, so every price-derived feature must be
+        # known by then: shift the indicators to reflect *yesterday's* close, and
+        # add the overnight gap (open vs prior close), which IS known at the open.
+        price_cols = feature_columns(feat, config)
+        feat[price_cols] = feat[price_cols].shift(1)
+        feat["gap"] = df["open"] / df["close"].shift(1) - 1.0
+
+    # External features are already lagged inside add_external_features, so in
+    # open_to_close mode lag_days=1 gives last night's S&P close — exactly the
+    # overnight lead we want, with no extra shift.
     feat = add_external_features(feat, config)
-    feat["target"] = make_label(feat, horizon=config.horizon)
+    feat["target"] = make_label(feat, horizon=config.horizon, mode=mode)
 
     cols = feature_columns(feat, config)
 

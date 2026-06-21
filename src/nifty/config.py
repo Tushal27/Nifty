@@ -64,6 +64,11 @@ class Config:
         return int(self.target.get("horizon", 1))
 
     @property
+    def target_mode(self) -> str:
+        """'close_to_close' (next-day) or 'open_to_close' (same-day intraday)."""
+        return str(self.target.get("mode", "close_to_close"))
+
+    @property
     def random_seed(self) -> int:
         return int(self.raw.get("random_seed", 42))
 

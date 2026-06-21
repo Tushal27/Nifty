@@ -38,6 +38,8 @@ def main() -> None:
     parser.add_argument("--ticker", default=None)
     parser.add_argument("--horizon", type=int, default=None,
                         help="prediction horizon in days (1=next-day, 5-20=trend)")
+    parser.add_argument("--mode", choices=["close_to_close", "open_to_close"],
+                        default=None, help="target type (default from config)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -47,6 +49,8 @@ def main() -> None:
         config.data["ticker"] = args.ticker
     if args.horizon is not None:
         config.raw.setdefault("target", {})["horizon"] = args.horizon
+    if args.mode is not None:
+        config.raw.setdefault("target", {})["mode"] = args.mode
 
     np.random.seed(config.random_seed)
 
@@ -61,7 +65,10 @@ def main() -> None:
     X, y, full = build_dataset(df, config)
     cols = feature_columns(full, config)
     horizon = config.horizon
-    target_desc = "next-day" if horizon == 1 else f"{horizon}-day-ahead trend"
+    if config.target_mode == "open_to_close":
+        target_desc = "same-day open→close (intraday)"
+    else:
+        target_desc = "next-day" if horizon == 1 else f"{horizon}-day-ahead trend"
     print(f"      target = {target_desc} direction | "
           f"{X.shape[0]:,} samples x {X.shape[1]} features | "
           f"up rate = {y.mean():.3f}")

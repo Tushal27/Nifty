@@ -74,6 +74,35 @@ def test_no_lookahead_in_features(sample_df, config):
     pd.testing.assert_frame_equal(a, b)
 
 
+def test_open_to_close_label(sample_df):
+    """open_to_close labels the same day's intraday move (close > open)."""
+    y = make_label(sample_df, mode="open_to_close")
+    for t in (5, 100, 250):
+        expected = int(sample_df["close"].iloc[t] > sample_df["open"].iloc[t])
+        assert int(y.iloc[t]) == expected
+
+
+def test_open_to_close_no_lookahead(sample_df):
+    """In open_to_close mode, today's CLOSE (the outcome) must not leak into
+    any feature at row t — features are known at the open."""
+    cfg = load_config()
+    cfg.raw.setdefault("target", {})["mode"] = "open_to_close"
+    cfg.raw["external"] = {"enabled": False}
+
+    X_a, y_a, _ = build_dataset(sample_df, cfg)
+    tampered = sample_df.copy()
+    # change a single day's close (the outcome of that day's open->close)
+    t = 150
+    tampered.iloc[t, tampered.columns.get_loc("close")] *= 1.5
+    X_b, _, _ = build_dataset(tampered, cfg)
+
+    # Every feature row up to and including day t must be identical across the
+    # tamper — changing close[t] only affects the target and *later* rows.
+    common = X_a.index.intersection(X_b.index)
+    upto = common[common <= sample_df.index[t]]
+    pd.testing.assert_frame_equal(X_a.loc[upto], X_b.loc[upto])
+
+
 def test_build_dataset_shapes(sample_df, config):
     X, y, full = build_dataset(sample_df, config)
     assert len(X) == len(y)

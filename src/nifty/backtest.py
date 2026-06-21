@@ -63,13 +63,17 @@ def run_backtest(
     cost = bt["cost_bps"] / 1e4
     tdays = bt["trading_days"]
 
-    # Next-day simple return realised by holding a position decided *today*.
-    next_ret = full["close"].pct_change().shift(-1)
+    if config.target_mode == "open_to_close":
+        # Enter at the open, exit at the close of the SAME day the signal is for.
+        market = (full["close"] / full["open"] - 1.0)
+    else:
+        # Next-day close-to-close return realised by holding a position today.
+        market = full["close"].pct_change().shift(-1)
 
     df = pd.DataFrame(index=proba.index)
     df["proba"] = proba
     df["position"] = _positions(proba, threshold, bt["allow_short"])
-    df["market_return"] = next_ret.reindex(df.index)
+    df["market_return"] = market.reindex(df.index)
     df = df.dropna(subset=["market_return"])
 
     # Transaction cost charged whenever the position changes.
@@ -120,9 +124,12 @@ def latest_signal(
     horizon = config.horizon
     last_date = X.index[-1]
     direction = "UP" if proba > threshold else "DOWN/FLAT"
-    horizon_text = (
-        "next trading day" if horizon == 1 else f"next {horizon} trading days"
-    )
+    if config.target_mode == "open_to_close":
+        horizon_text = "today's open -> close (enter at open)"
+    elif horizon == 1:
+        horizon_text = "next trading day"
+    else:
+        horizon_text = f"next {horizon} trading days"
     return {
         "as_of_date": str(last_date.date()),
         "horizon_days": horizon,

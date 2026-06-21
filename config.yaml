@@ -26,6 +26,11 @@ data:
 #                    legitimately higher (often ~60-70%). Train/test folds are
 #                    embargoed by (horizon-1) days to stay leakage-free.
 target:
+  # mode: "close_to_close" -> predict close[t+horizon] vs close[t] (decided at close)
+  #       "open_to_close"   -> predict close[t] vs open[t], decided at the OPEN, with
+  #                            price features shifted to yesterday's close so last
+  #                            night's S&P lead can be used without look-ahead.
+  mode: "close_to_close"
   horizon: 10
 
 # Optional exogenous (non-price) inputs — the honest way to add real predictive
