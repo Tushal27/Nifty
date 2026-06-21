@@ -3,8 +3,14 @@
 # ---------------------------------------------------------------------------
 
 data:
-  ticker: "^NSEI"          # Nifty 50 index on Yahoo Finance
-  start: "1990-01-01"      # yfinance returns from the earliest it has (~2007 for ^NSEI)
+  # Where to get data from:
+  #   "yfinance" -> Yahoo Finance ^NSEI   (history only reaches ~2007)
+  #   "nse"      -> niftyindices.com API   (reaches index inception ~1996 — the max)
+  # A non-null csv_path below overrides this and loads your own file instead.
+  source: "yfinance"
+  ticker: "^NSEI"          # used when source == yfinance
+  nse_index_name: "NIFTY 50"  # used when source == nse (e.g. "NIFTY 50", "NIFTY BANK")
+  start: "1990-01-01"      # APIs return from the earliest they actually have
   end: null                # null => today
   # Point this at your own long-history file to override the API fetch.
   # Expected columns (case-insensitive): Date, Open, High, Low, Close, Volume

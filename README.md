@@ -16,7 +16,7 @@ signals, performance metrics, and charts.
 
 | Stage | Module | What it does |
 |-------|--------|--------------|
-| Data | `src/nifty/data_loader.py` | Fetch via `yfinance` (`^NSEI`) **or** read your own CSV; clean + cache |
+| Data | `src/nifty/data_loader.py` | Fetch via `yfinance` (`^NSEI`, ~2007+), **NSE** niftyindices.com (~1996+), **or** your own CSV; clean + cache |
 | Features | `src/nifty/features.py` | Returns, SMA/EMA ratios, RSI, MACD, Bollinger %, ATR, volatility, momentum, volume — all trailing-only |
 | Models | `src/nifty/models.py` | Logistic Regression, Random Forest, XGBoost, LightGBM, and an optional Keras LSTM, behind one interface |
 | Evaluate | `src/nifty/evaluate.py` | `TimeSeriesSplit` walk-forward CV; accuracy / AUC / F1 comparison |
@@ -33,18 +33,27 @@ pip install -r requirements.txt
 
 ## Data
 
-By default the pipeline pulls Nifty 50 (`^NSEI`) from Yahoo Finance.
+Pick a source with `data.source` in `config.yaml`:
 
-> **Note on "50 years":** free APIs typically only reach back to ~2007 for
-> `^NSEI`, not a full 50 years. To use your own long-history file, set
-> `data.csv_path` in `config.yaml` to a CSV with columns
-> `Date, Open, High, Low, Close, Volume` (case-insensitive). The CSV path takes
-> precedence over the API.
+| `data.source` | Provider | History depth | Notes |
+|---|---|---|---|
+| `yfinance` (default) | Yahoo Finance `^NSEI` | ~**2007** → today | Easiest; limited by Yahoo's depth |
+| `nse` | niftyindices.com API | ~**1996** → today | **Maximum real Nifty 50 history** (index inception); paged one year at a time |
+| *(CSV)* | `data.csv_path` | whatever your file holds | Always overrides the API |
+
+> **Reality on "50 years":** the Nifty 50 index itself only began on **3 Nov 1995**
+> (launched Apr 1996), so ~**30 years** is the true maximum — there is no 50-year
+> Nifty 50 series. Use `source: "nse"` to get that full span. For your own file,
+> set `data.csv_path` to a CSV with columns `Date, Open, High, Low, Close, Volume`
+> (case-insensitive; `Volume` optional for index data).
 
 ```bash
 python scripts/fetch_data.py            # download + cache to data/nifty.parquet
 python scripts/fetch_data.py --refresh  # ignore cache and re-download
 ```
+
+> Network note: both Yahoo and niftyindices.com must be reachable. In restricted
+> environments the fetch fails with a clear message and you should use a CSV.
 
 ## Run the full pipeline
 
