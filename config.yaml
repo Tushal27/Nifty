@@ -106,6 +106,19 @@ options:
   stop_loss_mult: 2.0      # close early if loss exceeds mult × credit (0 = no stop)
   realized_window: 20      # lookback (days) for realized-vol in the recommendation
   vix_csv: "external_data/india_vix.csv"
+  # Position sizing + risk controls turn the per-notional edge into a survivable
+  # account. Sizing uses only PAST cycles; breakers cap the tail.
+  sizing:
+    method: "vol_target"   # vol_target | fixed_fraction | kelly
+    capital: 1000000       # starting account
+    target_vol: 0.15       # vol_target: annualised target volatility
+    risk_fraction: 0.02    # fixed_fraction: risk per trade (of capital)
+    kelly_fraction: 0.25   # fraction of full Kelly to actually deploy
+    max_leverage: 3.0      # hard cap on notional / capital
+    margin_pct: 0.12       # margin as fraction of notional (also caps leverage)
+    lookback: 50           # cycles for rolling vol/Kelly estimates
+    monthly_stop: 0.10     # halt new trades once the month's loss exceeds this
+    max_drawdown_stop: 0.30  # kill switch: stop trading below this drawdown
 
 output:
   dir: "outputs"

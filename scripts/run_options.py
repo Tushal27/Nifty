@@ -30,6 +30,9 @@ from nifty.data_loader import load_data  # noqa: E402
 from nifty.options.backtest import (  # noqa: E402
     STRUCTURES, OptionsConfig, recommend, run_options_backtest,
 )
+from nifty.options.sizing import (  # noqa: E402
+    SizingConfig, apply_sizing, equity_stats,
+)
 
 
 def _load_vix(path: str) -> pd.Series:
@@ -87,10 +90,30 @@ def main() -> None:
     table = pd.DataFrame(rows).T
     table.to_csv(os.path.join(out_dir, "options_metrics.csv"))
 
-    print("[3/4] Charts ...")
+    print("[3/4] Charts + risk-managed sizing ...")
     _plot_equity(curves, spot, charts_dir)
     bt_best, _ = run_options_backtest(spot, vix, cfg)
     _plot_cycle_hist(bt_best, cfg.structure, charts_dir)
+
+    # Risk-managed account: size the chosen structure and enforce breakers.
+    sizing_cfg = SizingConfig.from_dict({
+        **dict(opt_raw.get("sizing", {})),
+        "cycle_days": cfg.cycle_days, "trading_days": cfg.trading_days,
+    })
+    per_cycle = bt_best["ret"]
+    sized = apply_sizing(per_cycle, sizing_cfg)
+    flat = apply_sizing(per_cycle, SizingConfig.from_dict({
+        "method": "flat", "capital": sizing_cfg.capital,
+        "cycle_days": cfg.cycle_days, "trading_days": cfg.trading_days,
+        "max_leverage": 1.0, "margin_pct": 1.0, "monthly_stop": 1.0,
+        "max_drawdown_stop": 1.0,
+    }))  # 1x-notional, no sizing/breakers — the naive baseline
+    risk_table = pd.DataFrame([
+        equity_stats(flat, sizing_cfg, "1x notional (no risk mgmt)"),
+        equity_stats(sized, sizing_cfg, f"sized: {sizing_cfg.method} + breakers"),
+    ]).set_index("label")
+    risk_table.to_csv(os.path.join(out_dir, "options_sizing.csv"))
+    _plot_sized_equity(flat, sized, sizing_cfg, charts_dir)
 
     print("[4/4] Recommendation ...")
     rec = recommend(spot, vix, int(opt_raw.get("realized_window", 20)), cfg)
@@ -98,8 +121,13 @@ def main() -> None:
         json.dump(rec, fh, indent=2)
 
     print("-" * 64)
+    print("Per-notional edge by structure:")
     print(table[["cagr", "sharpe", "max_drawdown", "win_rate", "worst_cycle",
                  "total_return", "index_buy_hold_return"]].round(3).to_string())
+    print("-" * 64)
+    print(f"Risk-managed account ({cfg.structure}, start ₹{sizing_cfg.capital:,.0f}):")
+    print(risk_table[["final_multiple", "cagr", "sharpe", "max_drawdown",
+                      "worst_month", "avg_leverage", "cycles_halted"]].round(3).to_string())
     print("-" * 64)
     print(f"VRP signal as of {rec['as_of_date']}: implied(VIX)={rec['implied_vol_vix']} "
           f"vs realized={rec['realized_vol']}  ->  VRP={rec['variance_risk_premium']:+.4f}")
@@ -128,6 +156,27 @@ def _plot_equity(curves, spot, charts_dir):
     ax.grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(os.path.join(charts_dir, "options_equity.png"), dpi=120)
+    plt.close(fig)
+
+
+def _plot_sized_equity(flat, sized, cfg, charts_dir):
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(11, 7), sharex=True,
+                                  gridspec_kw={"height_ratios": [3, 1]})
+    ax.plot(flat.index, flat["equity"], label="1x notional (no risk mgmt)",
+            color="firebrick", alpha=0.8)
+    ax.plot(sized.index, sized["equity"], label=f"sized: {cfg.method} + breakers",
+            color="seagreen")
+    ax.set_yscale("log")
+    ax.set_title("Risk-managed account equity (log scale)")
+    ax.set_ylabel("Account value (₹)")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    ax2.fill_between(sized.index, sized["drawdown"] * 100, 0, color="seagreen",
+                     alpha=0.4)
+    ax2.set_ylabel("Drawdown %")
+    ax2.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(os.path.join(charts_dir, "options_sized_equity.png"), dpi=120)
     plt.close(fig)
 
 

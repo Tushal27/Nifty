@@ -164,6 +164,26 @@ risk** — a single crash week can erase months of premium; iron condors cap it.
 Returns are on full notional, so leverage amplifies both the gains *and* the tail.
 This is an educational research tool, **not** financial advice.
 
+### Position sizing & risk controls (`src/nifty/options/sizing.py`)
+
+The per-cycle backtest is *return on full notional* — the raw edge. How much to
+actually bet is a separate decision the sizing module makes from **past data
+only**, then simulates a real compounding account:
+
+- **Methods:** `vol_target` (lever to a target annual vol), `fixed_fraction`
+  (risk a % of capital per trade), `kelly` (fractional Kelly from the rolling
+  return distribution), `flat` (1× notional baseline).
+- **Circuit breakers:** a **monthly stop** (halt new trades once the month's loss
+  exceeds a limit; auto-resets next month) and a **max-drawdown kill switch**.
+- **Leverage cap** from `max_leverage` and `margin_pct`.
+
+**Important, honest finding:** sizing is a *risk knob*, not free money. Default
+`vol_target: 0.15` levered the strangle to ~2.7× → CAGR jumped 6.6%→16% with a
+slightly better Sharpe, **but** max drawdown rose −11%→−20%. And no breaker can
+stop a single ruinous cycle — only the leverage cap can. Vol-targeting even tends
+to be *most* levered right before a crash. Lower `target_vol`/`max_leverage` for
+safety; raise for aggression. Charts: `outputs/charts/options_sized_equity.png`.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.
