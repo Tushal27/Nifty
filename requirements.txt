@@ -8,5 +8,6 @@ matplotlib>=3.7
 yfinance>=0.2.40
 requests>=2.28
 pyarrow>=14.0
-# Optional / heavy — only needed when the LSTM model is enabled in config.yaml
-# tensorflow>=2.15
+# Deep-learning (LSTM) model. Heavy (~hundreds of MB); install the CPU build.
+# Required because models.lstm is enabled in config.yaml.
+tensorflow-cpu>=2.15

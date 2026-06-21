@@ -39,7 +39,7 @@ models:
   random_forest: true
   xgboost: true
   lightgbm: true
-  lstm: false
+  lstm: true
 
 lstm:
   window: 20               # number of past days fed to the sequence model
