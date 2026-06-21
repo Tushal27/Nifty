@@ -71,12 +71,18 @@ def add_indicators(df: pd.DataFrame, config: Config) -> pd.DataFrame:
     for w in cfg["momentum_windows"]:
         out[f"momentum_{w}"] = close.pct_change(w)
 
-    out["volume_change"] = out["volume"].pct_change().replace(
+    # Volume features must stay robust for index series that carry no volume
+    # (all zeros): a naive pct_change/ratio yields 0/0 -> NaN on every row, which
+    # would drop the entire dataset. Collapse those degenerate cases to neutral
+    # constants instead (0 change, ratio 1).
+    out["volume_change"] = (
+        out["volume"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    )
+    roll_vol = out["volume"].rolling(cfg["vol_window"]).mean()
+    out["volume_ratio"] = (out["volume"] / roll_vol).replace(
         [np.inf, -np.inf], np.nan
     )
-    out["volume_ratio"] = out["volume"] / out["volume"].rolling(
-        cfg["vol_window"]
-    ).mean()
+    out.loc[roll_vol == 0, "volume_ratio"] = 1.0  # divide-by-zero -> neutral
 
     return out
 

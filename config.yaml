@@ -16,7 +16,7 @@ data:
   end: null                # null => today
   # Point this at your own long-history file to override the API fetch.
   # Expected columns (case-insensitive): Date, Open, High, Low, Close, Volume
-  csv_path: null
+  csv_path: "nifty50_full_history.csv"
   cache_path: "data/nifty.parquet"
 
 features:
