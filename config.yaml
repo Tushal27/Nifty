@@ -90,6 +90,23 @@ backtest:
   cost_bps: 2.0            # per-trade transaction cost in basis points
   trading_days: 252        # for annualising Sharpe / CAGR
 
+# Options premium-selling backtest (scripts/run_options.py). Prices each leg with
+# Black-Scholes using India VIX as the implied vol — captures the variance risk
+# premium (VIX usually > realized vol, so selling earns a structural edge), with
+# a VIX regime filter and stop-loss for the tail.
+options:
+  risk_free_rate: 0.065
+  cycle_days: 5            # trading days to expiry per cycle (5≈weekly, 21≈monthly)
+  structure: "short_strangle"   # short_straddle | short_strangle | iron_condor
+  strangle_sd: 1.0         # short strikes at ±sd × expected move (≈1 std dev)
+  condor_wing_sd: 2.0      # long-wing distance for iron condor (defined risk)
+  strike_step: 50          # Nifty strike granularity
+  cost_per_leg_pts: 1.0    # round-trip transaction cost per leg, index points
+  vix_max: 1.50            # skip entries when VIX/100 above this (1.50 ≈ filter off)
+  stop_loss_mult: 2.0      # close early if loss exceeds mult × credit (0 = no stop)
+  realized_window: 20      # lookback (days) for realized-vol in the recommendation
+  vix_csv: "external_data/india_vix.csv"
+
 output:
   dir: "outputs"
   charts_dir: "outputs/charts"

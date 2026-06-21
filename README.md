@@ -133,6 +133,37 @@ prices, diff for flows). Enabling series that start ~2008 (VIX, flows) trims the
 usable window to that period — fewer rows, but real signal. Watch the printed
 **skill (best − baseline)** to see whether they actually help.
 
+## Options premium-selling system (the part with a *real* edge)
+
+Direction is ~random, but index options carry a documented **variance risk
+premium**: India VIX (implied vol) is usually higher than the volatility that
+actually realises, so **selling** options is paid for taking risk. This system
+harvests that edge with tail-risk controls.
+
+```bash
+python scripts/run_options.py                 # backtest all structures + today's call
+python scripts/run_options.py --structure iron_condor --cycle-days 5
+```
+
+- **Pricing** (`src/nifty/options/pricing.py`) — self-contained Black-Scholes
+  (price + delta), priced off India VIX as the implied vol.
+- **Backtest** (`src/nifty/options/backtest.py`) — sells a structure every cycle
+  (short straddle / strangle / iron condor), marks daily to expiry with an
+  optional **stop-loss** and **VIX regime filter**, settles at intrinsic value,
+  and reports CAGR, Sharpe, max drawdown, win rate, and the **worst single cycle**
+  (the tail). Configurable in `config.yaml` under `options`.
+- **Recommendation** — `outputs/options_signal.json`: today's implied-vs-realized
+  vol (the VRP), a stance (sell / avoid / neutral), and concrete strikes + credit.
+- **Charts** — `outputs/charts/options_equity.png` (vs index) and
+  `options_cycle_pnl.png` (note the fat **left** tail).
+
+**Honest limits:** Black-Scholes-from-VIX ignores volatility **skew** and term
+structure, so OTM credits are approximate; the backtest assumes fills at fair
+value with a flat per-leg cost. Short straddles/strangles have **undefined tail
+risk** — a single crash week can erase months of premium; iron condors cap it.
+Returns are on full notional, so leverage amplifies both the gains *and* the tail.
+This is an educational research tool, **not** financial advice.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.
