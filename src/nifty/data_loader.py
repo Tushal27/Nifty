@@ -24,14 +24,19 @@ from .config import Config
 OHLCV = ["open", "high", "low", "close", "volume"]
 OHLC = ["open", "high", "low", "close"]
 
-NIFTY_INDICES_HOME = "https://niftyindices.com"
-NIFTY_INDICES_HISTORICAL = (
-    "https://niftyindices.com/Backpage.aspx/getHistoricaldatatabletoString"
-)
+# niftyindices.com is reachable on both the apex and www hosts; we try both so a
+# transient/DNS issue on one does not sink the whole fetch.
+NIFTY_INDICES_HOSTS = ("https://www.niftyindices.com", "https://niftyindices.com")
+_NSE_HISTORICAL_PATH = "/Backpage.aspx/getHistoricaldatatabletoString"
+_NSE_PAGE_PATH = "/reports/historical-data"
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
+
+
+class _EgressBlocked(RuntimeError):
+    """Raised when the environment's network policy blocks the host (not the site)."""
 
 
 def _normalise(df: pd.DataFrame) -> pd.DataFrame:
@@ -91,7 +96,24 @@ def _fetch_yfinance(ticker: str, start: str, end: Optional[str]) -> pd.DataFrame
     return _normalise(raw)
 
 
-def _nse_session():
+def _is_egress_block(resp) -> bool:
+    """True if a 403 came from this environment's egress proxy, not the site."""
+    return (
+        resp is not None
+        and resp.status_code == 403
+        and "not in allowlist" in (resp.text or "").lower()
+    )
+
+
+_EGRESS_HINT = (
+    "niftyindices.com is blocked by this environment's network egress policy "
+    "(host not in allowlist). Add 'niftyindices.com' and 'www.niftyindices.com' "
+    "to the allowlist and start a NEW session, or set data.csv_path to load your "
+    "own file."
+)
+
+
+def _nse_session(host: str):
     """A requests session primed with the headers/cookies niftyindices expects."""
     import requests
 
@@ -102,70 +124,116 @@ def _nse_session():
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Content-Type": "application/json; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": "https://niftyindices.com/reports/historical-data",
-            "Origin": NIFTY_INDICES_HOME,
+            "Referer": host + _NSE_PAGE_PATH,
+            "Origin": host,
         }
     )
-    try:  # bootstrap cookies; failure here is non-fatal, the POST may still work
-        session.get(NIFTY_INDICES_HOME, timeout=20)
-    except Exception:  # noqa: BLE001 - network errors handled at call site
-        pass
+    # Warm up cookies via the home page and the historical-data page. Failures
+    # here are non-fatal; the POST loop classifies any hard block.
+    for warm in (host, host + _NSE_PAGE_PATH):
+        try:
+            session.get(warm, timeout=20)
+        except Exception:  # noqa: BLE001 - handled later by the POST loop
+            pass
     return session
 
 
-def _fetch_nse(index_name: str, start: str, end: Optional[str]) -> pd.DataFrame:
+def _nse_post(session, url: str, payload: dict, timeout: int, retries: int):
+    """POST with exponential backoff. Egress blocks raise immediately (no retry)."""
+    import requests
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        try:
+            resp = session.post(url, json=payload, timeout=timeout)
+            if _is_egress_block(resp):
+                raise _EgressBlocked(_EGRESS_HINT)
+            resp.raise_for_status()
+            return resp
+        except _EgressBlocked:
+            raise
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < retries:
+                time.sleep(2 ** attempt)  # 1s, 2s, 4s, ...
+    raise last_exc  # type: ignore[misc]
+
+
+def _fetch_nse(
+    index_name: str,
+    start: str,
+    end: Optional[str],
+    retries: int = 3,
+    timeout: int = 30,
+    pause: float = 0.4,
+) -> pd.DataFrame:
     """Pull full-history index data from niftyindices.com (back to ~1996).
 
-    The endpoint only serves a limited window per request, so we page through
-    the range one year at a time and concatenate.
+    The endpoint only serves a limited window per request, so we page through the
+    range one year at a time and concatenate. Each request is retried with
+    exponential backoff, and we fall back from the www host to the apex host on a
+    hard connection failure. A 403 from the egress proxy is surfaced immediately
+    with actionable guidance rather than being retried in vain.
     """
     import requests
 
     start_ts = pd.Timestamp(start or "1996-01-01")
     end_ts = pd.Timestamp(end) if end else pd.Timestamp.today().normalize()
 
-    session = _nse_session()
-    frames: list[pd.DataFrame] = []
-    cursor = start_ts
-    try:
-        while cursor <= end_ts:
-            chunk_end = min(
-                cursor + pd.DateOffset(years=1) - pd.Timedelta(days=1), end_ts
-            )
-            payload = {
-                "cinfo": json.dumps(
-                    {
-                        "name": index_name,
-                        "startDate": cursor.strftime("%d-%b-%Y"),
-                        "endDate": chunk_end.strftime("%d-%b-%Y"),
-                        "indexName": index_name,
-                    }
+    last_error: Optional[Exception] = None
+    for host in NIFTY_INDICES_HOSTS:
+        url = host + _NSE_HISTORICAL_PATH
+        session = _nse_session(host)
+        frames: list[pd.DataFrame] = []
+        cursor = start_ts
+        try:
+            while cursor <= end_ts:
+                chunk_end = min(
+                    cursor + pd.DateOffset(years=1) - pd.Timedelta(days=1), end_ts
                 )
-            }
-            resp = session.post(NIFTY_INDICES_HISTORICAL, json=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json().get("d")
-            records = json.loads(data) if isinstance(data, str) else data
-            if records:
-                frames.append(pd.DataFrame(records))
-            cursor = chunk_end + pd.Timedelta(days=1)
-            time.sleep(0.4)  # be polite to the endpoint
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            "NSE (niftyindices.com) request failed — the environment's network "
-            f"policy may block the host. Underlying error: {exc}. Set "
-            "data.csv_path in config.yaml to load your own file instead."
-        ) from exc
+                payload = {
+                    "cinfo": json.dumps(
+                        {
+                            "name": index_name,
+                            "startDate": cursor.strftime("%d-%b-%Y"),
+                            "endDate": chunk_end.strftime("%d-%b-%Y"),
+                            "indexName": index_name,
+                        }
+                    )
+                }
+                resp = _nse_post(session, url, payload, timeout, retries)
+                try:
+                    data = resp.json().get("d")
+                except ValueError as exc:  # non-JSON body
+                    raise RuntimeError(
+                        "niftyindices.com returned a non-JSON response "
+                        f"(first 120 chars: {resp.text[:120]!r})."
+                    ) from exc
+                records = json.loads(data) if isinstance(data, str) else data
+                if records:
+                    frames.append(pd.DataFrame(records))
+                cursor = chunk_end + pd.Timedelta(days=1)
+                time.sleep(pause)  # be polite to the endpoint
+        except _EgressBlocked as exc:
+            raise RuntimeError(_EGRESS_HINT) from exc
+        except requests.RequestException as exc:
+            last_error = exc
+            continue  # transient/connection failure: try the next host
 
-    if not frames:
-        raise RuntimeError(
-            f"NSE returned no data for index {index_name!r} in the requested range."
-        )
+        if not frames:
+            raise RuntimeError(
+                f"NSE returned no data for index {index_name!r} in the requested "
+                "range. Check the index name (e.g. 'NIFTY 50') and dates."
+            )
+        raw = pd.concat(frames, ignore_index=True)
+        # niftyindices uses upper-case OHLC and 'HistoricalDate'; _normalise
+        # lowercases and recognises those column names directly.
+        return _normalise(raw)
 
-    raw = pd.concat(frames, ignore_index=True)
-    # niftyindices uses upper-case OHLC and 'HistoricalDate'; _normalise lowercases
-    # and recognises those column names directly.
-    return _normalise(raw)
+    raise RuntimeError(
+        f"NSE request failed on all hosts {NIFTY_INDICES_HOSTS}. Last error: "
+        f"{last_error}. Set data.csv_path in config.yaml to load your own file."
+    )
 
 
 def load_data(config: Config, refresh: bool = False) -> pd.DataFrame:
@@ -194,7 +262,13 @@ def load_data(config: Config, refresh: bool = False) -> pd.DataFrame:
         source = f"CSV ({csv_path})"
     elif source_kind == "nse":
         index_name = data_cfg.get("nse_index_name", "NIFTY 50")
-        df = _fetch_nse(index_name, data_cfg.get("start"), data_cfg.get("end"))
+        df = _fetch_nse(
+            index_name,
+            data_cfg.get("start"),
+            data_cfg.get("end"),
+            retries=int(data_cfg.get("nse_retries", 3)),
+            timeout=int(data_cfg.get("nse_timeout", 30)),
+        )
         source = f"NSE niftyindices.com ({index_name})"
     elif source_kind == "yfinance":
         df = _fetch_yfinance(

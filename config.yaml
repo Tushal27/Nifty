@@ -10,6 +10,8 @@ data:
   source: "yfinance"
   ticker: "^NSEI"          # used when source == yfinance
   nse_index_name: "NIFTY 50"  # used when source == nse (e.g. "NIFTY 50", "NIFTY BANK")
+  nse_retries: 3           # per-request retries with exponential backoff (source == nse)
+  nse_timeout: 30          # per-request timeout in seconds (source == nse)
   start: "1990-01-01"      # APIs return from the earliest they actually have
   end: null                # null => today
   # Point this at your own long-history file to override the API fetch.
