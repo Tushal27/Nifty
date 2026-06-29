@@ -120,6 +120,13 @@ options:
     monthly_stop: 0.10     # halt new trades once the month's loss exceeds this
     max_drawdown_stop: 0.30  # kill switch: stop trading below this drawdown
 
+# Live/paper trading workflow (scripts/trade.py). Generates a sized trade ticket
+# and tracks paper positions. PAPER-TRADE FIRST — this is not financial advice.
+live:
+  lot_size: 75               # NSE Nifty options lot size
+  vrp_min_to_trade: 0.02     # only emit a SELL ticket when VRP exceeds this
+  ledger_path: "paper_trading/ledger.json"
+
 output:
   dir: "outputs"
   charts_dir: "outputs/charts"

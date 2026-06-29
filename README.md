@@ -184,6 +184,42 @@ stop a single ruinous cycle — only the leverage cap can. Vol-targeting even te
 to be *most* levered right before a crash. Lower `target_vol`/`max_leverage` for
 safety; raise for aggression. Charts: `outputs/charts/options_sized_equity.png`.
 
+## Operating manual — how to actually trade this (`scripts/trade.py`)
+
+> **Paper-trade this for months before risking a rupee.** Selling options has
+> real, account-ending tail risk (a strangle sold into the 2020 COVID week lost
+> ~5% of the account in days). This is an educational tool, **not** financial
+> advice.
+
+The weekly routine:
+
+```bash
+python scripts/trade.py ticket        # today's sized trade ticket
+python scripts/trade.py paper-open    # log it to the paper ledger (if it says SELL)
+python scripts/trade.py paper-mark    # run daily: settle expiries + mark to market
+python scripts/trade.py paper-status  # account equity + open positions
+python scripts/trade.py paper-report  # realized stats + equity chart
+```
+
+**The ticket** tells you everything to place with a broker: stance (SELL or STAND
+ASIDE based on the variance risk premium), exact legs (strikes + expiry), **how
+many lots** for your capital and risk settings, the credit in ₹, margin estimate,
+breakevens, stop-loss, and max risk. It only says SELL when implied vol is
+meaningfully richer than realized (`live.vrp_min_to_trade`).
+
+The rules it enforces for you:
+1. **Enter only on a positive edge** — sell when VRP > threshold, else stand aside.
+2. **Size from the risk module**, never by gut — lots come from your capital,
+   target vol, and leverage cap (`options.sizing`).
+3. **Stop-loss + monthly breaker** cap the damage; the **leverage cap** is your
+   only protection against a single gap — keep it low.
+4. **Validate on paper first** — `paper-*` tracks a real ledger
+   (`paper_trading/ledger.json`) so you can prove the edge before going live.
+
+**What it does NOT do:** place real orders. There is no broker connection — you
+review each ticket and decide. Live trading also needs *fresh* spot+VIX (this uses
+end-of-day CSVs), and real fills differ from the Black-Scholes-from-VIX estimates.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.
