@@ -1,0 +1,54 @@
+name: Daily Nifty Prediction
+
+# Runs every weekday evening IST and emails the next-day direction call + options
+# trade ticket. GitHub cron is in UTC and may be delayed a few minutes under load.
+on:
+  schedule:
+    - cron: "0 13 * * 1-5"   # 13:00 UTC = 18:30 IST, Mon–Fri
+  workflow_dispatch:          # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-daily.txt
+
+      - name: Refresh external data (VIX / S&P / USD-INR)
+        run: python scripts/fetch_external.py || true
+
+      - name: Generate daily report
+        run: python scripts/daily_report.py
+
+      - name: Report date
+        id: meta
+        run: echo "today=$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Email the report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "📈 Nifty next-day prediction — ${{ steps.meta.outputs.today }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: Nifty Bot <${{ secrets.MAIL_USERNAME }}>
+          html_body: file://outputs/daily_report.html
+          # plaintext fallback for clients that don't render HTML
+          body: file://outputs/daily_report.txt
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report
+          path: outputs/daily_report.*

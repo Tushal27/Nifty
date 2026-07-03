@@ -1,0 +1,136 @@
+# ---------------------------------------------------------------------------
+# Nifty 50 next-day direction prediction — configuration
+# ---------------------------------------------------------------------------
+
+data:
+  # Where to get data from:
+  #   "yfinance" -> Yahoo Finance ^NSEI   (history only reaches ~2007)
+  #   "nse"      -> niftyindices.com API   (reaches index inception ~1996 — the max)
+  # A non-null csv_path below overrides this and loads your own file instead.
+  source: "nse"
+  ticker: "^NSEI"          # used when source == yfinance
+  nse_index_name: "NIFTY 50"  # used when source == nse (e.g. "NIFTY 50", "NIFTY BANK")
+  nse_retries: 3           # per-request retries with exponential backoff (source == nse)
+  nse_timeout: 30          # per-request timeout in seconds (source == nse)
+  start: "1990-01-01"      # APIs return from the earliest they actually have
+  end: null                # null => today
+  # Point this at your own long-history file to override the API fetch.
+  # Expected columns (case-insensitive): Date, Open, High, Low, Close, Volume
+  csv_path: "nifty50_full_history.csv"
+  cache_path: "data/nifty.parquet"
+
+# What the model predicts.
+#   horizon: 1   -> next-day direction (hardest; near-random ~52-55% accuracy)
+#   horizon: 5-20 -> "will price be higher N days ahead?" — multi-day TREND.
+#                    Drift dominates noise over longer windows, so accuracy is
+#                    legitimately higher (often ~60-70%). Train/test folds are
+#                    embargoed by (horizon-1) days to stay leakage-free.
+target:
+  # mode: "close_to_close" -> predict close[t+horizon] vs close[t] (decided at close)
+  #       "open_to_close"   -> predict close[t] vs open[t], decided at the OPEN, with
+  #                            price features shifted to yesterday's close so last
+  #                            night's S&P lead can be used without look-ahead.
+  mode: "close_to_close"
+  horizon: 10
+
+# Optional exogenous (non-price) inputs — the honest way to add real predictive
+# skill, since they carry information the price chart does not. Each CSV needs a
+# Date column + one or more numeric value columns. Every value is auto-lagged by
+# lag_days so the model only sees PAST values (no look-ahead). Missing files are
+# skipped, so the pipeline still runs before you supply them. Note: VIX/flows
+# only start ~2008, so enabling them trims the usable history to that period.
+external:
+  enabled: true
+  lag_days: 1
+  sources:
+    - path: "external_data/india_vix.csv"   # NSE/Yahoo ^INDIAVIX daily close
+      prefix: "vix"
+    - path: "external_data/sp500.csv"        # Yahoo ^GSPC daily close (overnight US lead)
+      prefix: "sp500"
+    - path: "external_data/usdinr.csv"       # Yahoo INR=X daily close
+      prefix: "usdinr"
+    - path: "external_data/fii_dii.csv"      # NSE daily FII/DII net flows (₹ cr)
+      prefix: "flow"
+
+features:
+  sma_windows: [10, 20, 50, 200]
+  ema_windows: [10, 20, 50]
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  vol_window: 20
+  momentum_windows: [5, 10, 20]
+
+# Toggle individual models on/off. tensorflow (lstm) is off by default because
+# it is a heavy dependency; enable it after `pip install tensorflow`.
+models:
+  logistic: true
+  random_forest: true
+  xgboost: true
+  lightgbm: true
+  lstm: true
+
+lstm:
+  window: 20               # number of past days fed to the sequence model
+  epochs: 15
+  batch_size: 32
+  units: 32
+
+evaluate:
+  n_splits: 5              # TimeSeriesSplit walk-forward folds
+  select_metric: "roc_auc" # metric used to pick the "best" model
+
+backtest:
+  threshold: 0.5           # go long when P(up) > threshold, else flat
+  allow_short: false       # if true, go short when P(up) < (1 - threshold)
+  cost_bps: 2.0            # per-trade transaction cost in basis points
+  trading_days: 252        # for annualising Sharpe / CAGR
+
+# Options premium-selling backtest (scripts/run_options.py). Prices each leg with
+# Black-Scholes using India VIX as the implied vol — captures the variance risk
+# premium (VIX usually > realized vol, so selling earns a structural edge), with
+# a VIX regime filter and stop-loss for the tail.
+options:
+  risk_free_rate: 0.065
+  cycle_days: 5            # trading days to expiry per cycle (5≈weekly, 21≈monthly)
+  structure: "short_strangle"   # short_straddle | short_strangle | iron_condor
+  strangle_sd: 1.0         # short strikes at ±sd × expected move (≈1 std dev)
+  condor_wing_sd: 2.0      # long-wing distance for iron condor (defined risk)
+  strike_step: 50          # Nifty strike granularity
+  cost_per_leg_pts: 1.0    # round-trip transaction cost per leg, index points
+  vix_max: 1.50            # skip entries when VIX/100 above this (1.50 ≈ filter off)
+  stop_loss_mult: 2.0      # close early if loss exceeds mult × credit (0 = no stop)
+  realized_window: 20      # lookback (days) for realized-vol in the recommendation
+  vix_csv: "external_data/india_vix.csv"
+  # Position sizing + risk controls turn the per-notional edge into a survivable
+  # account. Sizing uses only PAST cycles; breakers cap the tail.
+  sizing:
+    method: "vol_target"   # vol_target | fixed_fraction | kelly
+    capital: 1000000       # starting account
+    target_vol: 0.15       # vol_target: annualised target volatility
+    risk_fraction: 0.02    # fixed_fraction: risk per trade (of capital)
+    kelly_fraction: 0.25   # fraction of full Kelly to actually deploy
+    max_leverage: 3.0      # hard cap on notional / capital
+    margin_pct: 0.12       # margin as fraction of notional (also caps leverage)
+    lookback: 50           # cycles for rolling vol/Kelly estimates
+    monthly_stop: 0.10     # halt new trades once the month's loss exceeds this
+    max_drawdown_stop: 0.30  # kill switch: stop trading below this drawdown
+
+# Live/paper trading workflow (scripts/trade.py). Generates a sized trade ticket
+# and tracks paper positions. PAPER-TRADE FIRST — this is not financial advice.
+live:
+  lot_size: 75               # NSE Nifty options lot size
+  vrp_min_to_trade: 0.02     # only emit a SELL ticket when VRP exceeds this
+  ledger_path: "paper_trading/ledger.json"
+
+output:
+  dir: "outputs"
+  charts_dir: "outputs/charts"
+  metrics_csv: "outputs/metrics.csv"
+  signal_json: "outputs/latest_signal.json"
+
+random_seed: 42
