@@ -220,6 +220,32 @@ The rules it enforces for you:
 review each ticket and decide. Live trading also needs *fresh* spot+VIX (this uses
 end-of-day CSVs), and real fills differ from the Black-Scholes-from-VIX estimates.
 
+## Daily email via GitHub Actions
+
+`.github/workflows/daily-prediction.yml` runs every weekday evening (18:30 IST /
+13:00 UTC), fetches fresh spot + VIX from Yahoo (CI runners have open internet),
+generates `outputs/daily_report.html` via `scripts/daily_report.py`, and emails it
+to you. The email contains the **next-day direction call** and the **options trade
+ticket** (or STAND ASIDE).
+
+**One-time setup** — add three repository secrets (Settings → Secrets and
+variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `MAIL_USERNAME` | your Gmail address (the sender) |
+| `MAIL_PASSWORD` | a Gmail **App Password** (16 chars; requires 2-Step Verification — a normal password won't work) |
+| `MAIL_TO` | where to send the report (e.g. your email) |
+
+Then trigger it manually once from the **Actions** tab → *Daily Nifty Prediction*
+→ *Run workflow* to confirm the email arrives. Notes:
+- Gmail App Passwords: Google Account → Security → 2-Step Verification → App
+  passwords. For another provider, change `server_address`/`server_port` in the
+  workflow.
+- GitHub cron is UTC and can be delayed a few minutes; scheduled workflows are
+  paused after ~60 days of no repo activity (a manual run re-arms them).
+- Run it locally any time with `python scripts/daily_report.py`.
+
 ## How it avoids common mistakes
 
 - **No shuffling.** All splits are time-ordered via `TimeSeriesSplit`.
