@@ -97,7 +97,7 @@ backtest:
 options:
   risk_free_rate: 0.065
   cycle_days: 5            # trading days to expiry per cycle (5≈weekly, 21≈monthly)
-  structure: "short_strangle"   # short_straddle | short_strangle | iron_condor
+  structure: "iron_condor"   # short_straddle | short_strangle | iron_condor (condor = capped loss)
   strangle_sd: 1.0         # short strikes at ±sd × expected move (≈1 std dev)
   condor_wing_sd: 2.0      # long-wing distance for iron condor (defined risk)
   strike_step: 50          # Nifty strike granularity
@@ -111,10 +111,10 @@ options:
   sizing:
     method: "vol_target"   # vol_target | fixed_fraction | kelly
     capital: 1000000       # starting account
-    target_vol: 0.15       # vol_target: annualised target volatility
+    target_vol: 0.08       # vol_target: annualised target volatility (conservative)
     risk_fraction: 0.02    # fixed_fraction: risk per trade (of capital)
     kelly_fraction: 0.25   # fraction of full Kelly to actually deploy
-    max_leverage: 3.0      # hard cap on notional / capital
+    max_leverage: 1.5      # hard cap on notional / capital (conservative)
     margin_pct: 0.12       # margin as fraction of notional (also caps leverage)
     lookback: 50           # cycles for rolling vol/Kelly estimates
     monthly_stop: 0.10     # halt new trades once the month's loss exceeds this
